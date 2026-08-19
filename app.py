@@ -1,8 +1,9 @@
 # 1. Install required Python packages
-!pip install -q streamlit scikit-learn pandas numpy
+
 
 # 2. Programmatically rewrite app.py with fixed string escaping
 app_code = """import sqlite3
+import sqlite3
 import pandas as pd
 import numpy as np
 import streamlit as st
