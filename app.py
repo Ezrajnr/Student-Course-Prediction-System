@@ -4,12 +4,23 @@ import pandas as pd
 import joblib  # Or pickle, to load your trained model
 
 # 1. Load your trained Random Forest model and label encoder
-# Make sure 'model.pkl' and 'label_encoder.pkl' are in your root directory
+import os
+import joblib
+import streamlit as st
+
+# Get the absolute path to the directory containing app.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 @st.cache_resource
 def load_ml_assets():
-    model = joblib.load('model.pkl')
-    label_encoder = joblib.load('label_encoder.pkl')
+    model_path = os.path.join(BASE_DIR, 'model.pkl')
+    encoder_path = os.path.join(BASE_DIR, 'label_encoder.pkl')
+    
+    model = joblib.load(model_path)
+    label_encoder = joblib.load(encoder_path)
     return model, label_encoder
+
+
 
 clf_model, le = load_ml_assets()
 
