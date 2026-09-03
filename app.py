@@ -6,7 +6,7 @@ import streamlit as st
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Student Course Prediction Portal", layout="wide")
-st.title("🎓 Student Course Recommendation & Prediction Portal")
+st.title("🎓 Student Course of Study Prediction System")
 st.write("Input the candidate's O'Level grades, UTME subject breakdown, and Post-UTME score to predict course suitability.")
 
 # --- 2. LOAD MODEL ASSETS ---
