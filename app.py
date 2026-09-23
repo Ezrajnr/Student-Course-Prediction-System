@@ -43,8 +43,8 @@ PURE_SCIENCE_COURSES = [
 ]
 
 SOCIAL_SCIENCE_COURSES = [
-    'Economics', 'Accounting', 'Business Administration', 
-    'Political Science', 'Mass Communication', 'Geography'
+    'Political Science', 'Business Administration', 'Economics', 
+    'Accounting', 'Mass Communication', 'Geography'
 ]
 
 def get_course_tier(course_name):
@@ -87,7 +87,7 @@ utme_cols = st.columns(5)
 utme_selected_subjects = []
 utme_scores = []
 
-# Default selection layout
+# Default selection matching Social Science combination
 default_selection = ['English', 'Government', 'Literature', 'Economics', 'Commerce']
 
 for idx in range(5):
@@ -103,7 +103,7 @@ for idx in range(5):
             f"Score", 
             min_value=0, 
             max_value=100, 
-            value=36 if idx > 0 else 36,  # Default to sum = 180 (36 * 5)
+            value=36,  # 36 * 5 = 180 total aggregate
             key=f"utme_score_{idx}"
         )
         utme_selected_subjects.append(subj)
@@ -114,7 +114,7 @@ utme_aggregate = sum(utme_scores)
 st.info(f"**Calculated UTME Aggregate Score:** {utme_aggregate} / 500")
 
 st.subheader("3. Post-UTME Score (0–100)")
-post_utme = st.number_input("Post-UTME Score", 0, 100, 65)
+post_utme = st.number_input("Post-UTME Score", 0, 100, 60)
 
 # --- 4. PREDICTION LOGIC ---
 if st.button("Predict Optimal Course"):
@@ -127,7 +127,7 @@ if st.button("Predict Optimal Course"):
     is_parallel_distinction = (distinction_count >= 5) and (credit_count == 0)
     is_parallel_credit = credit_count >= 5
 
-    # Check for specific distinctions
+    # Specific distinction checks
     has_eng_dist = olevel_inputs['English'] in ['A1', 'B2', 'B3']
     has_math_dist = olevel_inputs['Mathematics'] in ['A1', 'B2', 'B3']
     has_phy_dist = olevel_inputs['Physics'] in ['A1', 'B2', 'B3']
@@ -139,11 +139,15 @@ if st.button("Predict Optimal Course"):
     has_engineering_distinctions = has_eng_dist and has_math_dist and has_phy_dist and has_fmath_dist
     has_medical_distinctions = has_eng_dist and has_chem_dist and has_bio_dist
 
-    # Social Science Subject Analysis (O'Levels and UTME)
-    social_utme_list = ['Economics', 'Geography', 'Government', 'Commerce', 'Literature']
+    # --- SOCIAL SCIENCE SUBJECT COMBINATION DETECTOR ---
+    social_utme_keywords = ['Government', 'Literature', 'Economics', 'Commerce', 'Geography']
+    
+    # Check if candidate selected social science subjects in UTME
+    social_utme_count = sum(1 for s in utme_selected_subjects if s in social_utme_keywords)
     social_in_olevel = any(olevel_inputs[s] in ['A1', 'B2', 'B3', 'C4', 'C5', 'C6'] for s in ['Economics', 'Geography'])
-    social_in_utme = any(s in social_utme_list for s in utme_selected_subjects if s != 'English')
-    has_social_bias = social_in_olevel or social_in_utme
+    
+    # High social bias trigger
+    is_social_science_candidate = (social_utme_count >= 2) or social_in_olevel
 
     # Core science prerequisite grades
     chem_grade = grade_map[olevel_inputs['Chemistry']]
@@ -164,46 +168,47 @@ if st.button("Predict Optimal Course"):
     for course, prob in course_prob_map.items():
         score = prob
 
-        # RULE 1: STRICT PARALLEL CREDIT & LOW/MID SCORE OVERRIDE
-        if is_parallel_credit or (180 <= utme_aggregate <= 200 and 40 <= post_utme <= 65):
-            if course in PROFESSIONAL_COURSES:
-                score = 0.0  # ZERO OUT ALL PROFESSIONAL COURSES
-            elif has_social_bias:
-                if course in SOCIAL_SCIENCE_COURSES:
-                    score = (score + 1.0) * 10.0  # FORCE SOCIAL SCIENCE TO TOP
-                elif course in PURE_SCIENCE_COURSES:
-                    score *= 0.05
+        # RULE 1: SOCIAL SCIENCE CANDIDATE WITH UTME 180-200 & POST-UTME 40-65
+        if is_social_science_candidate and (180 <= utme_aggregate <= 200) and (40 <= post_utme <= 65):
+            if course in SOCIAL_SCIENCE_COURSES:
+                score = (score + 1.0) * 10.0  # Force Social Science to top priority
             else:
-                if course in PURE_SCIENCE_COURSES:
-                    score *= 5.0
+                score = 0.0  # Completely block Pure Science and Professional courses
 
-        # RULE 2: HIGH PERFORMANCE ENGINEERING TRACK
+        # RULE 2: OTHER PARALLEL CREDIT CANDIDATES (NON-SOCIAL SCIENCE)
+        elif is_parallel_credit and (180 <= utme_aggregate <= 200) and (40 <= post_utme <= 65):
+            if course in PROFESSIONAL_COURSES:
+                score = 0.0
+            elif course in PURE_SCIENCE_COURSES:
+                score *= 3.0
+
+        # RULE 3: HIGH PERFORMANCE ENGINEERING TRACK
         elif has_engineering_distinctions and utme_aggregate >= 250 and post_utme >= 60:
             if course in ENGINEERING_COURSES:
                 score *= 10.0
             elif course in MEDICAL_COURSES:
                 score = 0.0
 
-        # RULE 3: HIGH PERFORMANCE MEDICAL TRACK
+        # RULE 4: HIGH PERFORMANCE MEDICAL TRACK
         elif has_medical_distinctions and utme_aggregate >= 250 and post_utme >= 60:
             if course in MEDICAL_COURSES:
                 score *= 10.0
             elif course in ENGINEERING_COURSES:
                 score = 0.0
 
-        # RULE 4: GENERAL MID-RANGE TRACK (180 - 249 UTME)
+        # RULE 5: GENERAL MID-RANGE TRACK (180 - 249 UTME)
         elif (180 <= utme_aggregate <= 249) and (60 <= post_utme <= 75):
             if course in PROFESSIONAL_COURSES:
-                score = 0.0  # ZERO OUT PROFESSIONAL COURSES
-            elif has_social_bias and course in SOCIAL_SCIENCE_COURSES:
+                score = 0.0
+            elif is_social_science_candidate and course in SOCIAL_SCIENCE_COURSES:
                 score *= 5.0
-            elif not has_social_bias and course in PURE_SCIENCE_COURSES:
+            elif not is_social_science_candidate and course in PURE_SCIENCE_COURSES:
                 score *= 5.0
 
-        # RULE 5: HARD DEFICIT PENALTY (Missing Science Prerequisites)
+        # HARD DEFICIT PENALTY: Block Medical/Science if prerequisites failed
         if chem_grade > 6 or bio_grade > 6 or phy_grade > 6:
             if course in ['Medicine', 'Pharmacy', 'Biochemistry', 'Nursing', 'Dentistry']:
-                score = 0.0  # ABSOLUTE HARD BLOCK
+                score = 0.0
 
         adjusted_scores[course] = score
 
@@ -212,8 +217,8 @@ if st.button("Predict Optimal Course"):
     if total_score > 0:
         final_probs = {c: (s / total_score) * 100 for c, s in adjusted_scores.items()}
     else:
-        # Fallback if all scores end up zeroed out
-        fallback_courses = SOCIAL_SCIENCE_COURSES if has_social_bias else PURE_SCIENCE_COURSES
+        # Fallback ensuring Social Science tier if candidate selected Social Science subjects
+        fallback_courses = SOCIAL_SCIENCE_COURSES if is_social_science_candidate else PURE_SCIENCE_COURSES
         final_probs = {c: (100.0 / len(fallback_courses)) if c in fallback_courses else 0.0 for c in course_prob_map.keys()}
 
     # Rank overall courses by probability
