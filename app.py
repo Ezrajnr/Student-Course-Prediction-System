@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 # --- 1. PAGE CONFIGURATION ---
-st.set_page_config(page_title="Student Course Prediction Portal", layout="wide")
+st.set_page_config(page_title="Student Course Prediction System", layout="wide")
 st.title("🎓 Student Course of Study Prediction System")
 st.write("Input the candidate's O'Level grades, UTME subject breakdown, and Post-UTME score to predict course suitability.")
 
