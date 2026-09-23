@@ -94,14 +94,36 @@ post_utme = st.number_input("Post-UTME Score", 0, 100, 65)
 if st.button("Predict Optimal Course"):
     encoded_olevels = [grade_map[olevel_inputs[s]] for s in olevel_subjects]
     
-    # Analyze O'Level grade quality
+    # --- ACADEMIC PROFILE ANALYSIS ---
+    # Grade counts
     distinction_count = sum(1 for g in olevel_inputs.values() if g in ['A1', 'B2', 'B3'])
     credit_count = sum(1 for g in olevel_inputs.values() if g in ['C4', 'C5', 'C6'])
+    pass_or_fail = sum(1 for g in olevel_inputs.values() if g in ['D7', 'E8', 'F9'])
     
+    # Check for parallel distinction vs parallel credits
+    is_parallel_distinction = (distinction_count >= 5) and (credit_count == 0)
+    is_parallel_credit = (credit_count >= 5) and (distinction_count == 0)
+    is_mixed_profile = (distinction_count > 0) and (credit_count > 0)
+
+    # Social Science vs Natural Science Subject Quality Analysis
+    social_science_subjs = ['Economics', 'Geography']
+    natural_science_subjs = ['Physics', 'Chemistry', 'Biology']
+    
+    social_distinctions = sum(1 for s in social_science_subjs if olevel_inputs[s] in ['A1', 'B2', 'B3'])
+    social_credits = sum(1 for s in social_science_subjs if olevel_inputs[s] in ['C4', 'C5', 'C6'])
+    
+    science_distinctions = sum(1 for s in natural_science_subjs if olevel_inputs[s] in ['A1', 'B2', 'B3'])
+    science_credits = sum(1 for s in natural_science_subjs if olevel_inputs[s] in ['C4', 'C5', 'C6'])
+
+    # Subject bias determination
+    has_social_bias = (social_distinctions + social_credits) > (science_distinctions + science_credits)
+
+    # Key prerequisite grades
     chem_grade = grade_map[olevel_inputs['Chemistry']]
     bio_grade = grade_map[olevel_inputs['Biology']]
     phy_grade = grade_map[olevel_inputs['Physics']]
 
+    # Model input
     feature_vector = np.array(encoded_olevels + [utme_aggregate, post_utme]).reshape(1, -1)
     
     # Obtain raw model probabilities
@@ -109,32 +131,67 @@ if st.button("Predict Optimal Course"):
     classes = le.classes_
     course_prob_map = {classes[i]: raw_probs[i] for i in range(len(classes))}
 
-    # --- HEURISTIC WEIGHT ADJUSTMENTS ---
+    # --- RULE-BASED HEURISTIC WEIGHT ADJUSTMENTS ---
     adjusted_scores = {}
-    
+
     for course, prob in course_prob_map.items():
         score = prob
-        
-        # Criterion: 5+ Distinctions AND UTME >= 250 AND Post-UTME >= 60
-        if distinction_count >= 5 and utme_aggregate >= 250 and post_utme >= 60:
+
+        # CONDITION 1: Professional Course Tier
+        # Criteria: Parallel Distinctions AND UTME >= 250 AND Post-UTME > 80
+        if (is_parallel_distinction or distinction_count >= 5) and utme_aggregate >= 250 and post_utme > 80:
             if course in PROFESSIONAL_COURSES:
-                score *= 3.0  # Boost professional course weights
+                score *= 5.0
             elif course in PURE_SCIENCE_COURSES:
-                score *= 1.1
-        # Mixed Credits or lower test aggregates
-        elif credit_count >= 3 or (distinction_count < 5 and utme_aggregate < 250):
-            if course in PROFESSIONAL_COURSES:
-                score *= 0.05  # Strongly reduce professional eligibility
-            elif course in PURE_SCIENCE_COURSES:
-                score *= 2.0
+                score *= 0.5
             elif course in SOCIAL_SCIENCE_COURSES:
-                score *= 1.8
-                
-        # Subject deficit check
+                score *= 0.2
+
+        # CONDITION 2: Pure Science / Social Science Tier (High - Mid Range)
+        # Criteria: Mix of Distinctions and Credits AND UTME 180-249 AND Post-UTME 60-75
+        elif (is_mixed_profile or (distinction_count > 0 and credit_count > 0)) and (180 <= utme_aggregate <= 249) and (60 <= post_utme <= 75):
+            if course in PROFESSIONAL_COURSES:
+                score *= 0.05  # Strongly penalize professional tier
+            elif has_social_bias:
+                if course in SOCIAL_SCIENCE_COURSES:
+                    score *= 4.0
+                elif course in PURE_SCIENCE_COURSES:
+                    score *= 0.5
+            else:
+                if course in PURE_SCIENCE_COURSES:
+                    score *= 4.0
+                elif course in SOCIAL_SCIENCE_COURSES:
+                    score *= 1.2
+
+        # CONDITION 3: Lower Match / Parallel Credit Tier
+        # Criteria: Parallel Credits AND UTME 180-200 AND Post-UTME 40-65
+        elif (is_parallel_credit or credit_count >= 5) and (180 <= utme_aggregate <= 200) and (40 <= post_utme <= 65):
+            if course in PROFESSIONAL_COURSES:
+                score *= 0.01  # Fully disallow professional tier
+            elif has_social_bias:
+                if course in SOCIAL_SCIENCE_COURSES:
+                    score *= 5.0
+                elif course in PURE_SCIENCE_COURSES:
+                    score *= 0.3
+            else:
+                if course in PURE_SCIENCE_COURSES:
+                    score *= 3.0
+                elif course in SOCIAL_SCIENCE_COURSES:
+                    score *= 1.5
+
+        # DEFAULT FALLBACK ADJUSTMENTS
+        else:
+            if utme_aggregate < 180 or post_utme < 40:
+                if course in PROFESSIONAL_COURSES:
+                    score *= 0.01
+            if has_social_bias and course in SOCIAL_SCIENCE_COURSES:
+                score *= 2.0
+
+        # Hard constraint: Prerequisite fails for Science/Medical courses
         if chem_grade > 6 or bio_grade > 6 or phy_grade > 6:
-            if course in ['Medicine', 'Pharmacy', 'Biochemistry']:
-                score *= 0.01
-                
+            if course in ['Medicine', 'Pharmacy', 'Biochemistry', 'Nursing', 'Dentistry']:
+                score *= 0.001
+
         adjusted_scores[course] = score
 
     # Normalize adjusted scores to percentages
@@ -164,9 +221,8 @@ if st.button("Predict Optimal Course"):
     normalized_alts = []
     if alt_total > 0:
         for course, prob in same_tier_matches:
-            # Scale relative to remaining probability mass
             scaled_pct = (prob / alt_total) * (100.0 - primary_confidence)
-            normalized_alts.append((course, max(scaled_pct, 5.0)))
+            normalized_alts.append((course, max(scaled_pct, 1.0)))
     else:
         normalized_alts = same_tier_matches
 
@@ -185,12 +241,12 @@ if st.button("Predict Optimal Course"):
     
     st.caption(
         f"**Reasoning:** Recommended under the **{tier_label}** classification. "
-        f"Strong match on **{strong_str}** (O'Level) combined with a UTME Aggregate score of **{utme_aggregate}/500** "
-        f"and Post-UTME performance of **{post_utme}/100**."
+        f"Evaluated on O'Level profile (**{strong_str}**), UTME aggregate of **{utme_aggregate}/500**, "
+        f"and Post-UTME score of **{post_utme}/100**."
     )
     
     # --- DISPLAY 3 SAME-TIER ALTERNATIVE COURSES ---
-    st.markdown(f"### ALTERNATIVE COURSES ({tier_label.upper()} TIERS)")
+    st.markdown(f"### ALTERNATIVE COURSES ({tier_label.upper()} TIER)")
     
     alt_cols = st.columns(3)
     
